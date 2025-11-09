@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, Circle, Heart, Droplet } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/supabaseClient";
 import { toast } from "sonner";
 import { DayModal } from "@/components/Calendar/DayModal";
 import { MenstruationModal } from "@/components/Calendar/MenstruationModal";
@@ -27,6 +27,13 @@ export default function Calendar() {
   const [menstruationDays, setMenstruationDays] = useState<number[]>([]);
   const [symptomDays, setSymptomDays] = useState<number[]>([]);
   const navigate = useNavigate();
+
+  const formatLocalDate = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
 
   useEffect(() => {
     checkAuth();
@@ -59,7 +66,10 @@ export default function Calendar() {
         .lte('date', lastDay);
 
       if (cycles) {
-        const days = cycles.map(c => new Date(c.date).getDate());
+        const days: number[] = (cycles as any[]).map((c: any) => {
+          const [y, m, d] = String(c.date).split('-').map(Number);
+          return new Date(y, m - 1, d).getDate();
+        });
         setMenstruationDays(days);
       }
 
@@ -72,7 +82,10 @@ export default function Calendar() {
         .lte('date', lastDay);
 
       if (symptoms) {
-        const days = [...new Set(symptoms.map(s => new Date(s.date).getDate()))];
+        const days: number[] = [...new Set((symptoms as any[]).map((s: any) => {
+          const [y, m, d] = String(s.date).split('-').map(Number);
+          return new Date(y, m - 1, d).getDate();
+        }))] as number[];
         setSymptomDays(days);
       }
     } catch (error) {
@@ -111,12 +124,60 @@ export default function Calendar() {
     setShowDayModal(true);
   };
 
+  const removeMenstruation = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || !selectedDate) return;
+
+      const dateStr = formatLocalDate(selectedDate);
+
+      const { error } = await supabase
+        .from('menstruation_cycles')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('date', dateStr);
+
+      if (error) throw error;
+
+      toast.success("Menstruação removida com sucesso!");
+      await loadCalendarData();
+      setShowDayModal(false);
+    } catch (error) {
+      console.error('Error removing menstruation:', error);
+      toast.error("Erro ao remover");
+    }
+  };
+
+  const removeSymptoms = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || !selectedDate) return;
+
+      const dateStr = formatLocalDate(selectedDate);
+
+      const { error } = await supabase
+        .from('symptoms')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('date', dateStr);
+
+      if (error) throw error;
+
+      toast.success("Sintomas removidos com sucesso!");
+      await loadCalendarData();
+      setShowDayModal(false);
+    } catch (error) {
+      console.error('Error removing symptoms:', error);
+      toast.error("Erro ao remover sintomas");
+    }
+  };
+
   const saveMenstruation = async (intensity: string, notes: string) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user || !selectedDate) return;
 
-      const dateStr = selectedDate.toISOString().split('T')[0];
+      const dateStr = formatLocalDate(selectedDate);
 
       const { error } = await supabase
         .from('menstruation_cycles')
@@ -146,7 +207,7 @@ export default function Calendar() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user || !selectedDate) return;
 
-      const dateStr = selectedDate.toISOString().split('T')[0];
+      const dateStr = formatLocalDate(selectedDate);
 
       const { error } = await supabase
         .from('symptoms')
@@ -177,11 +238,25 @@ export default function Calendar() {
       <main className="max-w-lg mx-auto px-4 py-6 space-y-6 animate-fade-in">
         {/* Quick Actions */}
         <div className="grid grid-cols-2 gap-3">
-          <Button variant="outline" className="h-auto py-4 flex-col gap-2">
+          <Button 
+            variant="outline" 
+            className="h-auto py-4 flex-col gap-2"
+            onClick={() => {
+              setSelectedDate(new Date());
+              setShowMenstruationModal(true);
+            }}
+          >
             <Droplet className="w-5 h-5" />
             <span className="text-xs">Marcar Menstruação</span>
           </Button>
-          <Button variant="outline" className="h-auto py-4 flex-col gap-2">
+          <Button 
+            variant="outline" 
+            className="h-auto py-4 flex-col gap-2"
+            onClick={() => {
+              setSelectedDate(new Date());
+              setShowSymptomModal(true);
+            }}
+          >
             <Heart className="w-5 h-5" />
             <span className="text-xs">Registrar Sintomas</span>
           </Button>
@@ -304,6 +379,10 @@ export default function Calendar() {
           setShowDayModal(false);
           setShowSymptomModal(true);
         }}
+        hasMenstruation={selectedDate ? menstruationDays.includes(selectedDate.getDate()) : false}
+        hasSymptom={selectedDate ? symptomDays.includes(selectedDate.getDate()) : false}
+        onRemoveMenstruation={removeMenstruation}
+        onRemoveSymptom={removeSymptoms}
       />
 
       <MenstruationModal
