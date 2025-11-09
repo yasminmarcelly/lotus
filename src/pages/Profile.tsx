@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/Layout/Header";
 import { BottomNav } from "@/components/Layout/BottomNav";
 import { Button } from "@/components/ui/button";
@@ -7,20 +8,95 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { User, Mail, Calendar, Save } from "lucide-react";
 import { toast } from "sonner";
+import { supabase } from "@/integrations/supabase/client";
 
 export default function Profile() {
   const [isEditing, setIsEditing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [userData, setUserData] = useState({
-    name: "Maria Silva",
-    email: "maria@exemplo.com",
-    birthDate: "1990-05-15",
-    phone: "(11) 98765-4321",
+    name: "",
+    email: "",
+    birthDate: "",
   });
+  const navigate = useNavigate();
 
-  const handleSave = () => {
-    toast.success("Perfil atualizado com sucesso!");
-    setIsEditing(false);
+  useEffect(() => {
+    loadProfile();
+  }, []);
+
+  const loadProfile = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        navigate("/auth");
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+      if (profile) {
+        setUserData({
+          name: profile.name || "",
+          email: profile.email || "",
+          birthDate: profile.birth_date || "",
+        });
+      }
+    } catch (error) {
+      console.error('Error loading profile:', error);
+      toast.error("Erro ao carregar perfil");
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const handleSave = async () => {
+    setLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          name: userData.name,
+          email: userData.email,
+          birth_date: userData.birthDate
+        })
+        .eq('id', user.id);
+
+      if (error) throw error;
+
+      toast.success("Perfil atualizado com sucesso!");
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      toast.error("Erro ao atualizar perfil");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-calm pb-24">
+        <Header title="Meu Perfil" showBack showNotifications />
+        <main className="max-w-lg mx-auto px-4 py-6">
+          <Card className="shadow-soft border-border animate-pulse">
+            <CardContent className="pt-6 space-y-4">
+              <div className="h-10 bg-muted rounded" />
+              <div className="h-10 bg-muted rounded" />
+              <div className="h-10 bg-muted rounded" />
+            </CardContent>
+          </Card>
+        </main>
+        <BottomNav />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-calm pb-24">
@@ -75,16 +151,6 @@ export default function Profile() {
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="phone">Telefone</Label>
-              <Input
-                id="phone"
-                value={userData.phone}
-                onChange={(e) => setUserData({ ...userData, phone: e.target.value })}
-                disabled={!isEditing}
-              />
-            </div>
-
             <div className="flex gap-2 pt-4">
               {!isEditing ? (
                 <Button onClick={() => setIsEditing(true)} className="w-full">
@@ -95,9 +161,9 @@ export default function Profile() {
                   <Button variant="outline" onClick={() => setIsEditing(false)} className="flex-1">
                     Cancelar
                   </Button>
-                  <Button onClick={handleSave} className="flex-1">
+                  <Button onClick={handleSave} className="flex-1" disabled={loading}>
                     <Save className="w-4 h-4 mr-2" />
-                    Salvar
+                    {loading ? "Salvando..." : "Salvar"}
                   </Button>
                 </>
               )}

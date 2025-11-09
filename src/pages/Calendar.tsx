@@ -1,10 +1,16 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Header } from "@/components/Layout/Header";
 import { BottomNav } from "@/components/Layout/BottomNav";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, Circle, Heart, Droplet } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { DayModal } from "@/components/Calendar/DayModal";
+import { MenstruationModal } from "@/components/Calendar/MenstruationModal";
+import { SymptomModal } from "@/components/Symptoms/SymptomModal";
+import { useNavigate } from "react-router-dom";
 
 const daysOfWeek = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const months = [
@@ -15,10 +21,64 @@ const months = [
 export default function Calendar() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [showDayModal, setShowDayModal] = useState(false);
+  const [showMenstruationModal, setShowMenstruationModal] = useState(false);
+  const [showSymptomModal, setShowSymptomModal] = useState(false);
+  const [menstruationDays, setMenstruationDays] = useState<number[]>([]);
+  const [symptomDays, setSymptomDays] = useState<number[]>([]);
+  const navigate = useNavigate();
 
-  // Mock data - dias de menstruação e sintomas
-  const menstruationDays = [3, 4, 5, 6, 7];
-  const symptomDays = [8, 12, 15, 18, 20];
+  useEffect(() => {
+    checkAuth();
+    loadCalendarData();
+  }, [currentDate]);
+
+  const checkAuth = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      navigate("/auth");
+    }
+  };
+
+  const loadCalendarData = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth();
+      const firstDay = new Date(year, month, 1).toISOString().split('T')[0];
+      const lastDay = new Date(year, month + 1, 0).toISOString().split('T')[0];
+
+      // Load menstruation days
+      const { data: cycles } = await supabase
+        .from('menstruation_cycles')
+        .select('date')
+        .eq('user_id', user.id)
+        .gte('date', firstDay)
+        .lte('date', lastDay);
+
+      if (cycles) {
+        const days = cycles.map(c => new Date(c.date).getDate());
+        setMenstruationDays(days);
+      }
+
+      // Load symptom days
+      const { data: symptoms } = await supabase
+        .from('symptoms')
+        .select('date')
+        .eq('user_id', user.id)
+        .gte('date', firstDay)
+        .lte('date', lastDay);
+
+      if (symptoms) {
+        const days = [...new Set(symptoms.map(s => new Date(s.date).getDate()))];
+        setSymptomDays(days);
+      }
+    } catch (error) {
+      console.error('Error loading calendar data:', error);
+    }
+  };
 
   const getDaysInMonth = (date: Date) => {
     const year = date.getFullYear();
@@ -43,6 +103,71 @@ export default function Calendar() {
     if (menstruationDays.includes(day)) return "menstruation";
     if (symptomDays.includes(day)) return "symptom";
     return null;
+  };
+
+  const handleDayClick = (day: number) => {
+    const clickedDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
+    setSelectedDate(clickedDate);
+    setShowDayModal(true);
+  };
+
+  const saveMenstruation = async (intensity: string, notes: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || !selectedDate) return;
+
+      const dateStr = selectedDate.toISOString().split('T')[0];
+
+      const { error } = await supabase
+        .from('menstruation_cycles')
+        .upsert({
+          user_id: user.id,
+          date: dateStr,
+          flow_intensity: intensity,
+          notes
+        }, {
+          onConflict: 'user_id,date'
+        });
+
+      if (error) throw error;
+
+      toast.success("Menstruação registrada com sucesso!");
+      loadCalendarData();
+      setShowMenstruationModal(false);
+      setShowDayModal(false);
+    } catch (error) {
+      console.error('Error saving menstruation:', error);
+      toast.error("Erro ao salvar");
+    }
+  };
+
+  const saveSymptom = async (symptomName: string, intensity: number, notes: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user || !selectedDate) return;
+
+      const dateStr = selectedDate.toISOString().split('T')[0];
+
+      const { error } = await supabase
+        .from('symptoms')
+        .insert({
+          user_id: user.id,
+          date: dateStr,
+          symptom_name: symptomName,
+          intensity,
+          notes
+        });
+
+      if (error) throw error;
+
+      toast.success("Sintoma registrado com sucesso!");
+      loadCalendarData();
+      setShowSymptomModal(false);
+      setShowDayModal(false);
+    } catch (error) {
+      console.error('Error saving symptom:', error);
+      toast.error("Erro ao salvar sintoma");
+    }
   };
 
   return (
@@ -104,7 +229,7 @@ export default function Calendar() {
                 return (
                   <button
                     key={day}
-                    onClick={() => setSelectedDate(new Date(currentDate.getFullYear(), currentDate.getMonth(), day))}
+                    onClick={() => handleDayClick(day)}
                     className={cn(
                       "aspect-square rounded-lg flex flex-col items-center justify-center text-sm font-medium transition-all relative",
                       isToday && "ring-2 ring-primary ring-offset-2",
@@ -166,6 +291,34 @@ export default function Calendar() {
 
        
       </main>
+
+      <DayModal
+        isOpen={showDayModal}
+        onClose={() => setShowDayModal(false)}
+        selectedDate={selectedDate}
+        onMarkMenstruation={() => {
+          setShowDayModal(false);
+          setShowMenstruationModal(true);
+        }}
+        onRegisterSymptom={() => {
+          setShowDayModal(false);
+          setShowSymptomModal(true);
+        }}
+      />
+
+      <MenstruationModal
+        isOpen={showMenstruationModal}
+        onClose={() => setShowMenstruationModal(false)}
+        selectedDate={selectedDate}
+        onSave={saveMenstruation}
+      />
+
+      <SymptomModal
+        isOpen={showSymptomModal}
+        onClose={() => setShowSymptomModal(false)}
+        selectedDate={selectedDate}
+        onSave={saveSymptom}
+      />
 
       <BottomNav />
     </div>

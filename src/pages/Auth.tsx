@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Mail, Lock, User, Calendar } from "lucide-react";
 import { toast } from "sonner";
 import lotusLogo from "@/assets/lotus-logo.png";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
@@ -15,9 +16,17 @@ export default function Auth() {
     password: "",
     birthDate: "",
   });
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { signIn, signUp, user } = useAuth();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (user) {
+      navigate("/dashboard");
+    }
+  }, [user, navigate]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!isLogin && (!formData.name || !formData.birthDate)) {
@@ -30,15 +39,45 @@ export default function Auth() {
       return;
     }
 
-    // Após login, ir para dashboard. Após cadastro, mostrar onboarding
-    toast.success(isLogin ? "Bem-vinda de volta!" : "Conta criada com sucesso!");
-    setTimeout(() => {
+    if (formData.password.length < 6) {
+      toast.error("A senha deve ter pelo menos 6 caracteres");
+      return;
+    }
+
+    setLoading(true);
+    
+    try {
       if (isLogin) {
+        const { error } = await signIn(formData.email, formData.password);
+        if (error) {
+          if (error.message.includes("Invalid login credentials")) {
+            toast.error("Email ou senha incorretos");
+          } else {
+            toast.error("Erro ao fazer login: " + error.message);
+          }
+          return;
+        }
+        toast.success("Bem-vinda de volta!");
         navigate("/dashboard");
       } else {
+        const { error } = await signUp(formData.email, formData.password, formData.name, formData.birthDate);
+        if (error) {
+          if (error.message.includes("already registered")) {
+            toast.error("Este email já está cadastrado");
+          } else {
+            toast.error("Erro ao criar conta: " + error.message);
+          }
+          return;
+        }
+        toast.success("Conta criada com sucesso!");
         navigate("/onboarding");
       }
-    }, 500);
+    } catch (error) {
+      console.error("Auth error:", error);
+      toast.error("Erro ao processar requisição");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -132,8 +171,8 @@ export default function Auth() {
             </button>
           )}
 
-          <Button type="submit" size="lg" className="w-full mt-6">
-            {isLogin ? "Entrar" : "Criar Conta"}
+          <Button type="submit" size="lg" className="w-full mt-6" disabled={loading}>
+            {loading ? "Processando..." : (isLogin ? "Entrar" : "Criar Conta")}
           </Button>
 
           <div className="text-center pt-4">

@@ -13,6 +13,7 @@ import Professionals from "./pages/Professionals";
 import ProfessionalBooking from "./pages/ProfessionalBooking";
 import Appointments from "./pages/Appointments";
 import Articles from "./pages/Articles";
+import ArticleDetail from "./pages/ArticleDetail";
 import Crisis from "./pages/Crisis";
 import Medications from "./pages/Medications";
 import Reports from "./pages/Reports";
@@ -39,7 +40,7 @@ const App = () => (
           <Route path="/professionals" element={<Professionals />} />
           <Route path="/professional-booking" element={<ProfessionalBooking />} />
           <Route path="/appointments" element={<Appointments />} />
-          <Route path="/articles" element={<Articles />} />
+          <Route path="/articles/:id" element={<ArticleDetail />} />
           <Route path="/crisis" element={<Crisis />} />
           <Route path="/medications" element={<Medications />} />
           <Route path="/reports" element={<Reports />} />

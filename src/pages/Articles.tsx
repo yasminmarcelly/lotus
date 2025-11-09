@@ -1,91 +1,116 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/Layout/Header";
 import { BottomNav } from "@/components/Layout/BottomNav";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Search, BookmarkPlus, Clock, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useNavigate } from "react-router-dom";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
-const categories = ["Todos", "Sintomas", "Tratamentos", "Alimentação", "Bem-estar", "Diagnóstico"];
+const categories = ["Todos", "Sintomas", "Tratamentos", "Alimentação", "Bem-estar"];
 
-const articles = [
-  {
-    id: 1,
-    title: "Entendendo a Endometriose: O Que Você Precisa Saber",
-    category: "Sintomas",
-    readTime: "5 min",
-    excerpt: "Uma visão completa sobre a endometriose, seus sintomas e como identificar os sinais.",
-    date: "15 Nov 2024",
-    isSaved: false,
-  },
-  {
-    id: 2,
-    title: "Dieta Anti-inflamatória para Endometriose",
-    category: "Alimentação",
-    readTime: "8 min",
-    excerpt: "Conheça os alimentos que podem ajudar a reduzir a inflamação e aliviar os sintomas.",
-    date: "12 Nov 2024",
-    isSaved: true,
-  },
-  {
-    id: 3,
-    title: "Opções de Tratamento: Guia Completo",
-    category: "Tratamentos",
-    readTime: "12 min",
-    excerpt: "Explore as diferentes abordagens de tratamento disponíveis e como escolher a melhor para você.",
-    date: "10 Nov 2024",
-    isSaved: false,
-  },
-  {
-    id: 4,
-    title: "Exercícios e Endometriose: Como Se Movimentar com Segurança",
-    category: "Bem-estar",
-    readTime: "6 min",
-    excerpt: "Descubra quais exercícios são seguros e benéficos para quem tem endometriose.",
-    date: "8 Nov 2024",
-    isSaved: true,
-  },
-  {
-    id: 5,
-    title: "O Caminho para o Diagnóstico: Exames e Especialistas",
-    category: "Diagnóstico",
-    readTime: "10 min",
-    excerpt: "Entenda o processo de diagnóstico e quais exames são necessários.",
-    date: "5 Nov 2024",
-    isSaved: false,
-  },
-  {
-    id: 6,
-    title: "Técnicas de Gerenciamento da Dor",
-    category: "Bem-estar",
-    readTime: "7 min",
-    excerpt: "Aprenda métodos naturais e práticos para lidar com a dor no dia a dia.",
-    date: "3 Nov 2024",
-    isSaved: false,
-  },
-  {
-    id: 7,
-    title: "O Impacto Emocional da Endometriose",
-    category: "Bem-estar",
-    readTime: "9 min",
-    excerpt: "Como cuidar da sua saúde mental enquanto lida com uma doença crônica.",
-    date: "1 Nov 2024",
-    isSaved: true,
-  },
-];
+interface Article {
+  id: string;
+  title: string;
+  category: string;
+  excerpt: string;
+  image_url: string | null;
+  read_time: number | null;
+  created_at: string;
+}
 
 export default function Articles() {
   const [selectedCategory, setSelectedCategory] = useState("Todos");
   const [searchTerm, setSearchTerm] = useState("");
-  const [savedArticles, setSavedArticles] = useState<number[]>([2, 4, 7]);
+  const [articles, setArticles] = useState<Article[]>([]);
+  const [savedArticleIds, setSavedArticleIds] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  const toggleSave = (id: number) => {
-    setSavedArticles(prev =>
-      prev.includes(id) ? prev.filter(saved => saved !== id) : [...prev, id]
-    );
+  useEffect(() => {
+    checkAuth();
+    loadArticles();
+    loadSavedArticles();
+  }, []);
+
+  const checkAuth = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      navigate("/auth");
+    }
+  };
+
+  const loadArticles = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('articles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setArticles(data || []);
+    } catch (error) {
+      console.error('Error loading articles:', error);
+      toast.error('Erro ao carregar artigos');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadSavedArticles = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data } = await supabase
+        .from('saved_articles')
+        .select('article_id')
+        .eq('user_id', user.id);
+
+      if (data) {
+        setSavedArticleIds(new Set(data.map(item => item.article_id)));
+      }
+    } catch (error) {
+      console.error('Error loading saved articles:', error);
+    }
+  };
+
+  const toggleSave = async (articleId: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast.error('Você precisa estar logado');
+        return;
+      }
+
+      if (savedArticleIds.has(articleId)) {
+        await supabase
+          .from('saved_articles')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('article_id', articleId);
+        
+        setSavedArticleIds(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(articleId);
+          return newSet;
+        });
+        toast.success('Artigo removido dos salvos');
+      } else {
+        await supabase
+          .from('saved_articles')
+          .insert({ user_id: user.id, article_id: articleId });
+        
+        setSavedArticleIds(prev => new Set(prev).add(articleId));
+        toast.success('Artigo salvo com sucesso');
+      }
+    } catch (error) {
+      console.error('Error toggling save:', error);
+      toast.error('Erro ao salvar artigo');
+    }
   };
 
   const filteredArticles = articles.filter(article => {
@@ -153,73 +178,85 @@ export default function Articles() {
             <h3 className="text-lg font-semibold text-foreground">
               Artigos ({filteredArticles.length})
             </h3>
-            {savedArticles.length > 0 && (
-              <button
-                onClick={() => navigate("/saved-articles")}
-                className="text-sm text-primary hover:underline"
-              >
-                Ver salvos ({savedArticles.length})
-              </button>
+            {savedArticleIds.size > 0 && (
+              <span className="text-sm text-muted-foreground">
+                {savedArticleIds.size} salvos
+              </span>
             )}
           </div>
 
-          {filteredArticles.map((article) => (
-            <Card key={article.id} className="shadow-soft border-border hover:shadow-medium transition-shadow">
-              <CardContent className="pt-6">
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Badge variant="outline">{article.category}</Badge>
-                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <Clock className="w-3 h-3" />
-                        {article.readTime}
+          {loading ? (
+            <Card className="shadow-soft border-border animate-pulse">
+              <CardContent className="pt-6 space-y-4">
+                <div className="h-6 bg-muted rounded w-3/4" />
+                <div className="h-4 bg-muted rounded w-full" />
+                <div className="h-4 bg-muted rounded w-5/6" />
+              </CardContent>
+            </Card>
+          ) : filteredArticles.length === 0 ? (
+            <Card className="shadow-soft border-border">
+              <CardContent className="py-12 text-center">
+                <p className="text-muted-foreground">
+                  Nenhum artigo encontrado com esses critérios.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            filteredArticles.map((article) => (
+              <Card key={article.id} className="shadow-soft border-border hover:shadow-medium transition-shadow">
+                <CardContent className="pt-6">
+                  <div className="flex items-start justify-between gap-3 mb-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Badge variant="outline">{article.category}</Badge>
+                        {article.read_time && (
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                            <Clock className="w-3 h-3" />
+                            {article.read_time} min
+                          </div>
+                        )}
                       </div>
+                      
+                      <h3 className="text-base font-semibold text-foreground mb-2 leading-snug">
+                        {article.title}
+                      </h3>
+                      
+                      <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
+                        {article.excerpt}
+                      </p>
+                      
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(article.created_at).toLocaleDateString('pt-BR')}
+                      </p>
                     </div>
-                    
-                    <h3 className="text-base font-semibold text-foreground mb-2 leading-snug">
-                      {article.title}
-                    </h3>
-                    
-                    <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
-                      {article.excerpt}
-                    </p>
-                    
-                    <p className="text-xs text-muted-foreground">{article.date}</p>
+
+                    <button
+                      onClick={() => toggleSave(article.id)}
+                      className="p-2 rounded-full hover:bg-muted transition-colors shrink-0"
+                    >
+                      <BookmarkPlus
+                        className={cn(
+                          "w-5 h-5 transition-colors",
+                          savedArticleIds.has(article.id)
+                            ? "fill-primary text-primary"
+                            : "text-muted-foreground"
+                        )}
+                      />
+                    </button>
                   </div>
 
                   <button
-                    onClick={() => toggleSave(article.id)}
-                    className="p-2 rounded-full hover:bg-muted transition-colors shrink-0"
+                    onClick={() => navigate(`/articles/${article.id}`)}
+                    className="w-full text-primary hover:text-primary-glow font-medium text-sm flex items-center justify-center gap-2 py-2 rounded-lg hover:bg-primary-light/10 transition-all"
                   >
-                    <BookmarkPlus
-                      className={cn(
-                        "w-5 h-5 transition-colors",
-                        savedArticles.includes(article.id)
-                          ? "fill-primary text-primary"
-                          : "text-muted-foreground"
-                      )}
-                    />
+                    Ler artigo completo
+                    <ArrowRight className="w-4 h-4" />
                   </button>
-                </div>
-
-                <button className="w-full text-primary hover:text-primary-glow font-medium text-sm flex items-center justify-center gap-2 py-2 rounded-lg hover:bg-primary-light/10 transition-all">
-                  Ler artigo completo
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            ))
+          )}
         </div>
-
-        {filteredArticles.length === 0 && (
-          <Card className="shadow-soft border-border">
-            <CardContent className="py-12 text-center">
-              <p className="text-muted-foreground">
-                Nenhum artigo encontrado com esses critérios.
-              </p>
-            </CardContent>
-          </Card>
-        )}
       </main>
 
       <BottomNav />
