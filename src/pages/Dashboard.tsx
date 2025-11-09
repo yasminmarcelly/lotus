@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Header } from "@/components/Layout/Header";
 import { BottomNav } from "@/components/Layout/BottomNav";
 import { WeekCalendar } from "@/components/Dashboard/WeekCalendar";
@@ -6,9 +7,39 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Calendar, Heart, Pill, Users, FileText, ArrowRight, AlertCircle, FileBarChart } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/hooks/useAuth";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const [recentSymptoms, setRecentSymptoms] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (user) {
+      fetchRecentSymptoms();
+    }
+  }, [user]);
+
+  const fetchRecentSymptoms = async () => {
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from("symptoms")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(3);
+
+    if (error) {
+      console.error("Error fetching symptoms:", error);
+      return;
+    }
+
+    setRecentSymptoms(data || []);
+  };
 
   const quickStats = [
     { label: "Próximo Ciclo", value: "em 7 dias", icon: Calendar, color: "text-primary" },
@@ -117,27 +148,28 @@ export default function Dashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex items-start gap-3 p-3 rounded-lg bg-muted">
-              <div className="w-2 h-2 rounded-full bg-secondary-dark mt-2" />
-              <div className="flex-1">
-                <p className="text-sm font-medium text-foreground">Sintoma registrado</p>
-                <p className="text-xs text-muted-foreground">Dor pélvica • Intensidade 6/10 • Há 2 horas</p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3 p-3 rounded-lg bg-muted">
-              <div className="w-2 h-2 rounded-full bg-accent mt-2" />
-              <div className="flex-1">
-                <p className="text-sm font-medium text-foreground">Medicamento tomado</p>
-                <p className="text-xs text-muted-foreground">Ibuprofeno 600mg • Hoje às 14:30</p>
-              </div>
-            </div>
-            <div className="flex items-start gap-3 p-3 rounded-lg bg-muted">
-              <div className="w-2 h-2 rounded-full bg-primary mt-2" />
-              <div className="flex-1">
-                <p className="text-sm font-medium text-foreground">Ciclo atualizado</p>
-                <p className="text-xs text-muted-foreground">Menstruação • Dia 3 • Ontem</p>
-              </div>
-            </div>
+            {recentSymptoms.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                Nenhuma atividade recente
+              </p>
+            ) : (
+              recentSymptoms.map((symptom) => {
+                const symptomDate = new Date(symptom.created_at);
+                const formattedDate = format(symptomDate, "d 'de' MMMM 'às' HH:mm", { locale: ptBR });
+                
+                return (
+                  <div key={symptom.id} className="flex items-start gap-3 p-3 rounded-lg bg-muted">
+                    <div className="w-2 h-2 rounded-full bg-secondary-dark mt-2" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-foreground">Sintoma registrado</p>
+                      <p className="text-xs text-muted-foreground">
+                        {symptom.symptom_name} • Intensidade {symptom.intensity}/10 • {formattedDate}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </CardContent>
         </Card>
 
