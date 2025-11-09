@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Header } from "@/components/Layout/Header";
 import { BottomNav } from "@/components/Layout/BottomNav";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +10,10 @@ import { Slider } from "@/components/ui/slider";
 import { Plus, Check } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/lib/supabaseClient";
+import { useAuth } from "@/hooks/useAuth";
+import { format } from "date-fns";
+import { ptBR } from "date-fns/locale";
 
 const commonSymptoms = [
   "Dor Pélvica",
@@ -23,9 +27,36 @@ const commonSymptoms = [
 ];
 
 export default function Symptoms() {
+  const { user } = useAuth();
   const [selectedSymptoms, setSelectedSymptoms] = useState<string[]>([]);
   const [intensity, setIntensity] = useState<number>(5);
   const [notes, setNotes] = useState("");
+  const [recentSymptoms, setRecentSymptoms] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      fetchRecentSymptoms();
+    }
+  }, [user]);
+
+  const fetchRecentSymptoms = async () => {
+    if (!user) return;
+
+    const { data, error } = await supabase
+      .from("symptoms")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(5);
+
+    if (error) {
+      console.error("Error fetching symptoms:", error);
+      return;
+    }
+
+    setRecentSymptoms(data || []);
+  };
 
   const toggleSymptom = (symptom: string) => {
     setSelectedSymptoms(prev =>
@@ -35,16 +66,45 @@ export default function Symptoms() {
     );
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (selectedSymptoms.length === 0) {
       toast.error("Selecione pelo menos um sintoma");
       return;
     }
 
-    toast.success("Sintomas registrados com sucesso!");
-    setSelectedSymptoms([]);
-    setIntensity(5);
-    setNotes("");
+    if (!user) {
+      toast.error("Você precisa estar logado para registrar sintomas");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const symptomsToInsert = selectedSymptoms.map(symptom => ({
+        user_id: user.id,
+        symptom_name: symptom,
+        intensity,
+        notes,
+        date: new Date().toISOString().split('T')[0],
+      }));
+
+      const { error } = await supabase
+        .from("symptoms")
+        .insert(symptomsToInsert);
+
+      if (error) throw error;
+
+      toast.success("Sintomas registrados com sucesso!");
+      setSelectedSymptoms([]);
+      setIntensity(5);
+      setNotes("");
+      fetchRecentSymptoms();
+    } catch (error) {
+      console.error("Error saving symptoms:", error);
+      toast.error("Erro ao registrar sintomas");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -139,9 +199,9 @@ export default function Symptoms() {
           onClick={handleSave}
           size="lg"
           className="w-full"
-          disabled={selectedSymptoms.length === 0}
+          disabled={selectedSymptoms.length === 0 || loading}
         >
-          Salvar Registro
+          {loading ? "Salvando..." : "Salvar Registro"}
         </Button>
 
         {/* Recent History */}
@@ -150,24 +210,36 @@ export default function Symptoms() {
             <CardTitle className="text-lg">Últimos Registros</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="p-3 rounded-lg bg-muted">
-              <div className="flex items-start justify-between mb-2">
-                <p className="text-sm font-medium text-foreground">Hoje, 14:30</p>
-                <span className="text-xs px-2 py-1 rounded-full bg-destructive/20 text-destructive font-medium">
-                  Intensidade 6
-                </span>
-              </div>
-              <p className="text-sm text-muted-foreground">Dor Pélvica, Fadiga</p>
-            </div>
-            <div className="p-3 rounded-lg bg-muted">
-              <div className="flex items-start justify-between mb-2">
-                <p className="text-sm font-medium text-foreground">Ontem, 10:15</p>
-                <span className="text-xs px-2 py-1 rounded-full bg-secondary text-secondary-foreground font-medium">
-                  Intensidade 4
-                </span>
-              </div>
-              <p className="text-sm text-muted-foreground">Cólicas, Inchaço</p>
-            </div>
+            {recentSymptoms.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                Nenhum sintoma registrado ainda
+              </p>
+            ) : (
+              recentSymptoms.map((symptom) => {
+                const symptomDate = new Date(symptom.created_at);
+                const formattedDate = format(symptomDate, "d 'de' MMMM, HH:mm", { locale: ptBR });
+                const intensityColor = symptom.intensity >= 7 
+                  ? "bg-destructive/20 text-destructive" 
+                  : symptom.intensity >= 4 
+                  ? "bg-secondary text-secondary-foreground" 
+                  : "bg-primary/20 text-primary";
+
+                return (
+                  <div key={symptom.id} className="p-3 rounded-lg bg-muted">
+                    <div className="flex items-start justify-between mb-2">
+                      <p className="text-sm font-medium text-foreground capitalize">{formattedDate}</p>
+                      <span className={cn("text-xs px-2 py-1 rounded-full font-medium", intensityColor)}>
+                        Intensidade {symptom.intensity}
+                      </span>
+                    </div>
+                    <p className="text-sm text-muted-foreground">{symptom.symptom_name}</p>
+                    {symptom.notes && (
+                      <p className="text-xs text-muted-foreground mt-1 italic">{symptom.notes}</p>
+                    )}
+                  </div>
+                );
+              })
+            )}
           </CardContent>
         </Card>
 
